@@ -1,0 +1,57 @@
+---
+- name: Create Jenkins Pipeline Job using Ansible
+  hosts: localhost
+  gather_facts: no
+  vars:
+    jenkins_url: "{{ lookup('env', 'JENKINS_URL') | default('http://localhost:8080', true) }}"
+    jenkins_user: "{{ lookup('env', 'JENKINS_USER') | default('admin', true) }}"
+    jenkins_token: "{{ lookup('env', 'JENKINS_TOKEN') }}"
+    job_name: "{{ lookup('env', 'JOB_NAME') | default('coffee_order_pipeline', true) }}"
+    jenkinsfile_path: "{{ lookup('env', 'JENKINSFILE_PATH') | default('../Jenkinsfile', true) }}"
+    
+  tasks:
+    - name: Check if Jenkins token is provided
+      fail:
+        msg: "JENKINS_TOKEN environment variable must be set"
+      when: jenkins_token is not defined or jenkins_token == ""
+
+    - name: Read Jenkinsfile content
+      slurp:
+        src: "{{ jenkinsfile_path }}"
+      register: jenkinsfile_content
+      when: jenkinsfile_path is defined
+
+    - name: Generate Jenkins pipeline XML config
+      set_fact:
+        pipeline_xml: |
+          <?xml version='1.1' encoding='UTF-8'?>
+          <flow-definition plugin="workflow-job@2.42">
+            <description>Automatically created pipeline: {{ job_name }}</description>
+            <keepDependencies>false</keepDependencies>
+            <definition class="org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition" plugin="workflow-cps@2.92">
+              <script>{{ jenkinsfile_content.content | b64decode }}</script>
+              <sandbox>true</sandbox>
+            </definition>
+            <triggers/>
+            <disabled>false</disabled>
+          </flow-definition>
+
+    - name: Create Jenkins pipeline job
+      community.general.jenkins_job:
+        name: "{{ job_name }}"
+        config: "{{ pipeline_xml }}"
+        url: "{{ jenkins_url }}"
+        user: "{{ jenkins_user }}"
+        token: "{{ jenkins_token }}"
+        state: present
+        validate_certs: false
+      register: jenkins_job_result
+
+    - name: Display job creation result
+      debug:
+        msg:
+          - "✅ Jenkins job '{{ job_name }}' created/updated successfully!"
+          - "Job URL: {{ jenkins_url }}/job/{{ job_name }}/"
+          - "State: {{ jenkins_job_result.state }}"
+          - "Enabled: {{ jenkins_job_result.enabled }}"
+

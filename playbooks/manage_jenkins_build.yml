@@ -1,0 +1,101 @@
+---
+- name: Manage Jenkins Build (Trigger, Stop, Delete)
+  hosts: localhost
+  gather_facts: no
+  vars:
+    jenkins_url: "{{ lookup('env', 'JENKINS_URL') | default('http://localhost:8080', true) }}"
+    jenkins_user: "{{ lookup('env', 'JENKINS_USER') | default('admin', true) }}"
+    jenkins_token: "{{ lookup('env', 'JENKINS_TOKEN') }}"
+    job_name: "{{ lookup('env', 'JOB_NAME') | default('coffee_order_pipeline', true) }}"
+    build_action: "{{ lookup('env', 'BUILD_ACTION') | default('trigger', true) }}"  # trigger, stop, delete
+    build_number: "{{ lookup('env', 'BUILD_NUMBER') | default('', true) }}"  # Required for stop/delete
+    build_args: "{{ lookup('env', 'BUILD_ARGS') | default('', true) }}"  # JSON string for build parameters
+    detach: "{{ lookup('env', 'DETACH') | default('false', true) | bool }}"  # Don't wait for build to complete
+    time_between_checks: "{{ lookup('env', 'TIME_BETWEEN_CHECKS') | default(10, true) | int }}"
+    
+  tasks:
+    - name: Display configuration
+      debug:
+        msg:
+          - "Job Name: {{ job_name }}"
+          - "Build Action: {{ build_action }}"
+          - "Build Number: {{ build_number | default('N/A') }}"
+          - "Jenkins URL: {{ jenkins_url }}"
+          - "Jenkins User: {{ jenkins_user }}"
+          - "Detach Mode: {{ detach }}"
+
+    - name: Check if Jenkins token is provided
+      fail:
+        msg: "JENKINS_TOKEN environment variable must be set"
+      when: jenkins_token is not defined or jenkins_token == ""
+
+    - name: Check if build_number is provided for stop/delete actions
+      fail:
+        msg: "BUILD_NUMBER environment variable must be set for 'stop' or 'delete' actions"
+      when: 
+        - build_action in ['stop', 'delete']
+        - build_number == "" or build_number is not defined
+
+    - name: Convert build_args to string and set default
+      set_fact:
+        build_args_str: "{{ build_args | default('', true) | string }}"
+        parsed_build_args: {}
+
+    - name: Parse build arguments from JSON string
+      set_fact:
+        parsed_build_args: "{{ build_args_str | from_json }}"
+      when: 
+        - build_args_str != ""
+        - build_args_str != "{}"
+      failed_when: false
+      ignore_errors: true
+
+    - name: Trigger Jenkins build
+      community.general.jenkins_build:
+        name: "{{ job_name }}"
+        url: "{{ jenkins_url }}"
+        user: "{{ jenkins_user }}"
+        token: "{{ jenkins_token }}"
+        state: present
+        args: "{{ parsed_build_args }}"
+        detach: "{{ detach }}"
+        time_between_checks: "{{ time_between_checks }}"
+      register: build_result
+      when: build_action == "trigger"
+
+    - name: Stop Jenkins build
+      community.general.jenkins_build:
+        name: "{{ job_name }}"
+        build_number: "{{ build_number | int }}"
+        url: "{{ jenkins_url }}"
+        user: "{{ jenkins_user }}"
+        token: "{{ jenkins_token }}"
+        state: stopped
+      register: build_result
+      when: build_action == "stop"
+
+    - name: Delete Jenkins build
+      community.general.jenkins_build:
+        name: "{{ job_name }}"
+        build_number: "{{ build_number | int }}"
+        url: "{{ jenkins_url }}"
+        user: "{{ jenkins_user }}"
+        token: "{{ jenkins_token }}"
+        state: absent
+      register: build_result
+      when: build_action == "delete"
+
+    - name: Display build operation result
+      debug:
+        msg:
+          - "✅ Build operation '{{ build_action }}' completed for job '{{ job_name }}'!"
+          - "Build Info: {{ build_result.build_info | default('N/A') }}"
+          - "State: {{ build_result.state | default('N/A') }}"
+          - "Build URL: {{ build_result.build_info.url | default('N/A') if build_result.build_info is defined else 'N/A' }}"
+      when: build_result is defined
+
+    - name: Display detailed build information
+      debug:
+        var: build_result
+      when: build_result is defined
+

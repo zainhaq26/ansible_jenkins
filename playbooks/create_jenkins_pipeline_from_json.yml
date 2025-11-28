@@ -1,0 +1,68 @@
+---
+- name: Create Jenkins Pipeline Job from JSON Config
+  hosts: localhost
+  gather_facts: no
+  vars:
+    jenkins_url: "{{ lookup('env', 'JENKINS_URL') | default('http://localhost:8080', true) }}"
+    jenkins_user: "{{ lookup('env', 'JENKINS_USER') | default('admin', true) }}"
+    jenkins_token: "{{ lookup('env', 'JENKINS_TOKEN') }}"
+    json_config_file: "{{ lookup('env', 'JSON_CONFIG_FILE') | default('../pipeline_config.json', true) }}"
+    
+  tasks:
+    - name: Check if Jenkins token is provided
+      fail:
+        msg: "JENKINS_TOKEN environment variable must be set"
+      when: jenkins_token is not defined or jenkins_token == ""
+
+    - name: Load JSON configuration
+      include_vars:
+        file: "{{ json_config_file }}"
+        name: pipeline_config
+      when: json_config_file is defined
+
+    - name: Set job name from config or default
+      set_fact:
+        job_name: "{{ pipeline_config.job_name | default('coffee_order_pipeline', true) }}"
+        jenkinsfile_path: "{{ pipeline_config.jenkinsfile_path | default('../Jenkinsfile', true) }}"
+        job_description: "{{ pipeline_config.description | default('Pipeline created from JSON', true) }}"
+        sandbox: "{{ pipeline_config.sandbox | default(true, true) }}"
+
+    - name: Read Jenkinsfile content
+      slurp:
+        src: "{{ jenkinsfile_path }}"
+      register: jenkinsfile_content
+
+    - name: Generate Jenkins pipeline XML config from JSON
+      set_fact:
+        pipeline_xml: |
+          <?xml version='1.1' encoding='UTF-8'?>
+          <flow-definition plugin="workflow-job@2.42">
+            <description>{{ job_description }}</description>
+            <keepDependencies>false</keepDependencies>
+            <definition class="org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition" plugin="workflow-cps@2.92">
+              <script>{{ jenkinsfile_content.content | b64decode }}</script>
+              <sandbox>{{ sandbox | lower }}</sandbox>
+            </definition>
+            <triggers/>
+            <disabled>false</disabled>
+          </flow-definition>
+
+    - name: Create Jenkins pipeline job from JSON config
+      community.general.jenkins_job:
+        name: "{{ job_name }}"
+        config: "{{ pipeline_xml }}"
+        url: "{{ jenkins_url }}"
+        user: "{{ jenkins_user }}"
+        token: "{{ jenkins_token }}"
+        state: present
+        validate_certs: false
+      register: jenkins_job_result
+
+    - name: Display job creation result
+      debug:
+        msg:
+          - "✅ Jenkins job '{{ job_name }}' created/updated successfully!"
+          - "Job URL: {{ jenkins_url }}/job/{{ job_name }}/"
+          - "State: {{ jenkins_job_result.state }}"
+          - "Enabled: {{ jenkins_job_result.enabled }}"
+

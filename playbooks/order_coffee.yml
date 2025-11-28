@@ -1,0 +1,59 @@
+---
+- name: Order Coffee from Coffee Shop API
+  hosts: localhost
+  gather_facts: no
+  vars:
+    coffee_shop_url: "http://localhost:8000"
+    # Coffee order configuration - customize these values
+    coffee_order:
+      size: "medium"  # Options: small, medium, large
+      coffee_type: "hot"  # Options: hot, iced
+      flavors: []  # Options: french vanilla, hazelnut, caramel, mocha, vanilla, cinnamon (max 3)
+      milk: "oat"  # Options: whole, oat, almond, soy, none (optional)
+      extra_shot: 1  # Number of extra shots (0-5, optional)
+      special_instructions: "Extra hot please"  # Optional instructions
+
+  tasks:
+    - name: Check if coffee shop API is available
+      uri:
+        url: "{{ coffee_shop_url }}/health"
+        method: GET
+        status_code: 200
+      register: health_check
+      failed_when: false
+
+    - name: Display health check status
+      debug:
+        msg: "Coffee Shop API is {{ 'healthy' if health_check.status == 200 else 'unavailable' }}"
+
+    - name: Place coffee order
+      uri:
+        url: "{{ coffee_shop_url }}/orders"
+        method: POST
+        headers:
+          Content-Type: "application/json"
+        body_format: json
+        body: "{{ coffee_order }}"
+        status_code: 201
+      register: order_response
+
+    - name: Display order confirmation
+      debug:
+        msg: "Order placed successfully! {{order_response.json}}"
+
+    - name: Display order summary
+      debug:
+        msg:
+          - "Order ID: {{ order_response.json.order_id }}"
+          - "Size: {{ order_response.json.size }}"
+          - "Type: {{ order_response.json.coffee_type }}"
+          - "Estimated Price: ${{ order_response.json.estimated_price }}"
+          - "Estimated Prep Time: {{ order_response.json.estimated_prep_time }} minutes"
+          - "Status: {{ order_response.json.status }}"
+
+    - name: Save order ID to file for Jenkins pipeline
+      copy:
+        content: "{{ order_response.json.order_id }}"
+        dest: "/tmp/order_id.txt"
+      delegate_to: localhost
+

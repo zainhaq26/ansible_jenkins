@@ -1,0 +1,23 @@
+{
+  "job_name": "coffee_order_pipeline",
+  "description": "Automatically created coffee order pipeline from JSON",
+  "jenkinsfile_path": "Jenkinsfile",
+  "sandbox": true,
+  "disabled": false,
+  "triggers": [],
+  "parameters": [
+    {
+      "name": "COFFEE_SIZE",
+      "type": "choice",
+      "choices": ["small", "medium", "large"],
+      "default": "medium"
+    },
+    {
+      "name": "COFFEE_TYPE",
+      "type": "choice",
+      "choices": ["hot", "iced"],
+      "default": "hot"
+    }
+  ]
+}
+

@@ -1,0 +1,123 @@
+---
+- name: Manage Jenkins Job (Create, Delete, Enable, Disable)
+  hosts: localhost
+  gather_facts: no
+  vars:
+    # Variables can be set via -e flag (takes precedence) or environment variables
+    # Example: ansible-playbook playbook.yml -e "job_name=my_job"
+    jenkins_url: "{{ lookup('env', 'JENKINS_URL') | default('http://localhost:8080', true) }}"
+    jenkins_user: "{{ lookup('env', 'JENKINS_USER') | default('admin', true) }}"
+    jenkins_token: "{{ lookup('env', 'JENKINS_TOKEN') }}"
+    job_name: "{{ lookup('env', 'JOB_NAME') | default('coffee_order_pipeline', true) }}"
+    job_action: "{{ lookup('env', 'JOB_ACTION') | default('create', true) }}"  # create, delete, enable, disable
+    jenkinsfile_path: "{{ lookup('env', 'JENKINSFILE_PATH') | default('../Jenkinsfile', true) }}"
+    
+  tasks:
+    - name: Display configuration
+      debug:
+        msg:
+          - "Job Name: {{ job_name }}"
+          - "Job Action: {{ job_action }}"
+          - "Jenkins URL: {{ jenkins_url }}"
+          - "Jenkins User: {{ jenkins_user }}"
+          - "Jenkinsfile Path: {{ jenkinsfile_path }}"
+
+    - name: Check if Jenkins token is provided
+      fail:
+        msg: "JENKINS_TOKEN environment variable must be set"
+      when: jenkins_token is not defined or jenkins_token == ""
+
+    - name: Check if Jenkinsfile exists
+      stat:
+        path: "{{ jenkinsfile_path }}"
+      register: jenkinsfile_stat
+      when: job_action == "create"
+
+    - name: Fail if Jenkinsfile not found
+      fail:
+        msg: "Jenkinsfile not found at {{ jenkinsfile_path }}. Current directory: {{ ansible_env.PWD }}"
+      when: job_action == "create" and not jenkinsfile_stat.stat.exists
+
+    - name: Read Jenkinsfile content (for create action)
+      slurp:
+        src: "{{ jenkinsfile_path }}"
+      register: jenkinsfile_content
+      when: job_action == "create" and jenkinsfile_stat.stat.exists
+
+    - name: Generate Jenkins pipeline XML config
+      set_fact:
+        pipeline_xml: |
+          <?xml version='1.1' encoding='UTF-8'?>
+          <flow-definition plugin="workflow-job@2.42">
+            <description>Pipeline: {{ job_name }}</description>
+            <keepDependencies>false</keepDependencies>
+            <definition class="org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition" plugin="workflow-cps@2.92">
+              <script>{{ jenkinsfile_content.content | b64decode }}</script>
+              <sandbox>true</sandbox>
+            </definition>
+            <triggers/>
+            <disabled>false</disabled>
+          </flow-definition>
+      when: job_action == "create"
+
+    - name: Create Jenkins pipeline job
+      community.general.jenkins_job:
+        name: "{{ job_name }}"
+        config: "{{ pipeline_xml }}"
+        url: "{{ jenkins_url }}"
+        user: "{{ jenkins_user }}"
+        token: "{{ jenkins_token }}"
+        state: present
+        validate_certs: false
+      register: jenkins_job_result
+      when: job_action == "create"
+      failed_when: false
+
+    - name: Display job creation details
+      debug:
+        var: jenkins_job_result
+      when: job_action == "create" and jenkins_job_result is defined
+
+    - name: Delete Jenkins job
+      community.general.jenkins_job:
+        name: "{{ job_name }}"
+        url: "{{ jenkins_url }}"
+        user: "{{ jenkins_user }}"
+        token: "{{ jenkins_token }}"
+        state: absent
+        validate_certs: false
+      register: jenkins_job_result
+      when: job_action == "delete"
+
+    - name: Disable Jenkins job
+      community.general.jenkins_job:
+        name: "{{ job_name }}"
+        url: "{{ jenkins_url }}"
+        user: "{{ jenkins_user }}"
+        token: "{{ jenkins_token }}"
+        enabled: false
+        validate_certs: false
+      register: jenkins_job_result
+      when: job_action == "disable"
+
+    - name: Enable Jenkins job
+      community.general.jenkins_job:
+        name: "{{ job_name }}"
+        url: "{{ jenkins_url }}"
+        user: "{{ jenkins_user }}"
+        token: "{{ jenkins_token }}"
+        enabled: true
+        validate_certs: false
+      register: jenkins_job_result
+      when: job_action == "enable"
+
+    - name: Display job operation result
+      debug:
+        msg:
+          - "✅ Jenkins job '{{ job_name }}' operation '{{ job_action }}' completed!"
+          - "Job URL: {{ jenkins_url }}/job/{{ job_name }}/"
+          - "State: {{ jenkins_job_result.state | default('N/A') }}"
+          - "Enabled: {{ jenkins_job_result.enabled | default('N/A') }}"
+      when: jenkins_job_result is defined
+
+
